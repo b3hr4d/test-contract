@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "outDir": "./out",
+    "rootDir": "./src",
+    "sourceMap": true,
+    "incremental": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "target": "es5"
+  }
+}
