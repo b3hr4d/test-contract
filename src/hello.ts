@@ -1,246 +1,443 @@
-import * as usersData from "./UserData.json";
-import * as userListData from "./UserList.json";
+// import * as usersData from "./UserData.json";
+// import * as userListData from "./UserList.json";
+const userInterest = {};
+let Now = 1000;
+class Stbank {
+  payWithStt(_sender: any, daily: number, referrals: number) {
+    this.totalSttSupply += daily + referrals;
+    return true;
+  }
+  withdrawTrx(_sender: string, interest: number, referrals: number) {
+    this.totalSttSupply += interest;
+    this.users[_sender] -= 700;
+    this.contractBalance -= 700;
+    return true;
+  }
+  depositTrx(_sender: any, _value: any): boolean {
+    this.contractBalance += _value;
+    if (this.users[_sender]) {
+      this.users[_sender] += _value;
+    } else this.users[_sender] = _value;
+    return true;
+  }
+  contractUserBalance(_user: string): any {
+    return this.users[_user];
+  }
+  users = {};
+  contractBalance = 1000000;
+  sttPrice = () => Math.floor(this.contractBalance / 1000000);
+  totalSttSupply = 0;
+}
+const STBank = new Stbank();
+class emit {
+  static WithdrawFromBank(_sender: string, interest: any, arg2: number) {
+    if (userInterest[_sender]) {
+      userInterest[_sender] += interest;
+    } else userInterest[_sender] = interest;
+    console.log("Withdraw: ", _sender, interest);
+  }
+  static RegisterNewUser(_sender: any, arg1: string, arg2: number) {
+    console.log("Register: ", _sender, arg1, arg2);
+  }
+  static DepositToBank(_sender: any, currentPrice: any, arg2: number) {
+    console.log("Deposit: ", _sender, currentPrice, arg2);
+  }
+}
 
+const now = () => {
+  return Math.floor(Now / 1000);
+};
+
+let STT_LIMIT = 100000000000000000000;
+let PERIOD_LENGTH = 37;
 let currentLevel = 1;
-let refCompleted = 0;
 let REFERRER_1_LEVEL_LIMIT = 3;
 let LEVELS = [3, 9, 27, 81, 243, 729, 2187];
+let PERCENTAGE = [206158436164, 137438957253, 687194786265];
 
 type Address = string;
 
-interface user {
+interface User {
   id: number;
-  // trx: number;
-  // time: number;
   isExist: boolean;
-  referralId: number;
-  referral: Address[];
-  levelStat: number[];
+  startTime: number[];
+  referralID: number;
+  lastWithdraw: number;
+  referrals: Address[];
+  refStates: number[];
+  refAmounts: number;
 }
 
-type users = {
-  [key: string]: user;
+type Users = {
+  [key: string]: User;
 };
 
-const Users: users = usersData;
+const users: Users = {};
 
 const userList: {
   [key: number]: string;
-} = userListData;
+} = {};
 
 const profitStat: {
   [key: string]: number;
 } = {};
 
-let levelStat: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+let currUserID = 1;
 
-let currUserID = 9999;
+users["0x0"] = {
+  isExist: true,
+  referralID: 0,
+  id: currUserID,
+  startTime: [now()],
+  referrals: [],
+  refAmounts: 0,
+  lastWithdraw: 0,
+  refStates: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+};
+userList[currUserID] = "0x0";
 
-// Users["0x0"] = {
-//   id: 0,
-//   // trx: 700,
-//   referral: [],
-//   referralId: 0,
-//   isExist: true,
-//   // time: Date.now(),
-//   levelStat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-// };
-// userList[currUserID] = "0x0";
+STBank.depositTrx("0x0", 700);
 
-function registerUser(_referrerID: number, _sender: Address, _value: number) {
+function totalBalance() {
+  return STBank.contractBalance;
+}
+
+function freezePrice() {
+  return STBank.sttPrice() * 700;
+}
+
+function regUser(_referrer: Address, _sender: Address, _value: number) {
+  requires(!users[_sender]?.isExist, "Error::Refferal, User exist!");
+  let currentPrice = freezePrice();
+  requires(_value == currentPrice, "Error::Refferal, Incorrect Value!");
+  requires(
+    STBank.totalSttSupply < STT_LIMIT,
+    "Error::Refferal, New user could not be added anymore!"
+  );
+  let _referrerID;
+
+  if (users[_referrer]?.isExist) {
+    _referrerID = users[_referrer].id;
+  } else if (_referrer == "") {
+    _referrerID = findRandomFreeReferrer();
+  } else {
+    requires(false, "Error::Refferal, Incorrect referrer!");
+  }
+  console.log(_referrerID, currUserID);
+  requires(
+    _referrerID > 0 && _referrerID <= currUserID,
+    "Error::Refferal, Incorrect referrer Id!"
+  );
+
+  if (
+    users[userList[_referrerID]]?.referrals.length >= REFERRER_1_LEVEL_LIMIT
+  ) {
+    _referrerID = users[findMostFreeReferrals(userList[_referrerID])]?.id;
+  }
+
+  requires(
+    STBank.depositTrx(_sender, _value),
+    "Error::Refferal, Deposit failed!"
+  );
   currUserID++;
-  Users[_sender] = {
-    id: currUserID,
-    // trx: _value,
-    referral: [],
-    referralId: _referrerID,
-    isExist: true,
-    // time: Date.now() + 3600,
-    levelStat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-  };
 
+  users[_sender] = {
+    isExist: true,
+    id: currUserID,
+    referralID: _referrerID,
+    startTime: [],
+    referrals: [],
+    lastWithdraw: 0,
+    refAmounts: 0,
+    refStates: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  };
   userList[currUserID] = _sender;
 
-  Users[userList[_referrerID]].referral.push(_sender);
-  Users[userList[_referrerID]].levelStat[0] += 1;
-
-  let lastRefParent = _referrerID;
-  for (let i = 1; i < 15; i++) {
-    const refParent = Users[userList[lastRefParent]].referralId;
+  if (users[userList[_referrerID]]) {
+    users[userList[_referrerID]].referrals.push(_sender);
+  }
+  console.log("refferal: ", _referrerID);
+  let lastRefParent = currUserID;
+  for (let i = 0; i < 15; i++) {
+    let refParent = users[userList[lastRefParent]]?.referralID;
     if (refParent != lastRefParent) {
-      Users[userList[refParent]].levelStat[i] += 1;
+      if (users[userList[refParent]]) {
+        users[userList[refParent]].refStates[i] += 1;
+        if (userBalance(userList[refParent]) >= currentPrice) {
+          users[userList[refParent]].refAmounts += PERCENTAGE[i < 2 ? i : 2];
+        }
+      }
+      lastRefParent = refParent;
+    }
+    if (lastRefParent == 1) break;
+  }
+  users[_sender].startTime.push(now());
+
+  emit.RegisterNewUser(_sender, userList[_referrerID], now());
+}
+
+function updatePrice(_sender: Address, _value: number) {
+  requires(users[_sender]?.isExist, "Error::Refferal, User not exist!");
+  requires(
+    STBank.totalSttSupply < STT_LIMIT,
+    "Error::Refferal, We reach the cap!"
+  );
+
+  let currentPrice = freezePrice();
+
+  requires(
+    userBalance(_sender) + _value == currentPrice,
+    "Error:: Refferal, Incorrect Value!"
+  );
+
+  requires(
+    STBank.depositTrx(_sender, _value),
+    "Error::Refferal, Deposit failed!"
+  );
+
+  let lastRefParent = users[_sender].id;
+  for (let i = 0; i < 15; i++) {
+    let refParent = users[userList[lastRefParent]]?.referralID;
+    if (refParent != lastRefParent) {
+      if (users[userList[refParent]]) {
+        if (userBalance(userList[refParent]) >= currentPrice) {
+          users[userList[refParent]].refAmounts += PERCENTAGE[i < 2 ? i : 2];
+        }
+      }
       lastRefParent = refParent;
     }
     if (lastRefParent == 0) break;
   }
+
+  users[_sender].startTime.push(now());
+
+  emit.DepositToBank(_sender, currentPrice, now());
 }
 
-function currentLevelPrice() {
-  return currentLevel * 700;
+function withdrawFromBank(_sender: Address) {
+  requires(userExpired(_sender), "Error::Refferal, User is not expired!");
+
+  const [daily, referrals, withdrawTime] = calculateInterest(_sender);
+
+  requires(
+    STBank.withdrawTrx(_sender, daily, referrals),
+    "Error::Refferal, Withdraw failed!"
+  );
+  users[_sender].refAmounts -= referrals;
+  users[_sender].lastWithdraw = withdrawTime;
+  emit.WithdrawFromBank(_sender, daily, now());
 }
 
-function regUser(_referrer: Address, _sender: Address, _value: number) {
-  if (Users[_sender]?.isExist) {
-    console.log("Error::Refferal, User exist");
-    return;
+function calculateInterest(_sender: Address) {
+  requires(users[_sender]?.isExist, "Error::Refferal, User not exist!");
+  let userBalances = userBalance(_sender);
+  let currentPrice = freezePrice();
+
+  requires(userBalances > 0, "Error::Refferal, User dosen't have value!");
+
+  let daily = 0;
+  let referral = 0;
+  let withdrawTime = 0;
+
+  for (let i = 0; i < users[_sender].startTime.length; i++) {
+    let lastAmount = 0;
+    withdrawTime = now() - users[_sender].startTime[i];
+    if (withdrawTime > 37) withdrawTime = 37;
+    if (users[_sender].lastWithdraw < 37) {
+      if (users[_sender].lastWithdraw > 0)
+        lastAmount = 2 ** users[_sender].lastWithdraw * 50;
+      daily += 2 ** withdrawTime * 50 - lastAmount;
+    }
   }
 
-  let _referrerID: number;
+  console.log("daily: %s, time: %s", daily, withdrawTime);
 
-  if (Users[_referrer]?.isExist) {
-    _referrerID = Users[_referrer].id;
-  } else if (_referrer == "") {
-    _referrerID = findRandomFreeReferrer();
-  } else {
-    console.log("Error::Refferal, Incorrect referrer");
-    return;
+  if (userBalances == currentPrice) {
+    referral = users[_sender].refAmounts;
   }
 
-  if (_referrerID < 0 || _referrerID >= currUserID + 1) {
-    console.log("Error::Refferal, Incorrect referrer Id");
-    return;
-  }
-  if (_value != currentLevelPrice()) {
-    console.log("Error::Refferal, Incorrect Value");
-    return;
-  }
-
-  if (Users[userList[_referrerID]].referral.length >= REFERRER_1_LEVEL_LIMIT) {
-    _referrerID = Users[findMostFreeReferrals(userList[_referrerID])].id;
-  }
-
-  registerUser(_referrerID, _sender, _value);
-
-  payForLevel(currentLevel, _sender, _referrer, _value);
+  return [daily, referral, withdrawTime];
 }
 
-function findMostFreeReferrals(_user: string): string {
-  if (Users[_user].referral.length < 3) return _user;
+function withdrawIntrest(_sender: Address) {
+  let [daily, referrals, withdrawTime] = calculateInterest(_sender);
 
-  console.log(Users[_user]);
+  requires(
+    STBank.payWithStt(_sender, daily, referrals),
+    "Error::Refferal, Withdraw failed!"
+  );
 
-  let level = completedLevel(_user);
+  users[_sender].refAmounts -= referrals;
+  users[_sender].lastWithdraw = withdrawTime;
 
+  emit.WithdrawFromBank(_sender, daily + referrals, withdrawTime);
+}
+
+function findMostFreeReferrals(_user: Address) {
+  if (users[_user].referrals.length < REFERRER_1_LEVEL_LIMIT) {
+    return _user;
+  }
+
+  let currentLevel = completedLevel(_user);
+
+  let freeReferrer;
   let noFreeReferrer = true;
-  let freeReferrer: string;
-  let members = 0;
 
-  if (level) {
-    console.log("level: ", level);
-
-    const [members, checkLoop] = totalMembers(_user, level);
-
-    console.log("Members: %s, checkLoop: %s", members, checkLoop);
-
+  if (currentLevel != 0) {
+    console.log("currentLevel: ", currentLevel);
+    const [members, startLoop] = totalMembers(currentLevel);
+    console.log("Members: %s, StartLoop: %s", members, startLoop);
     let referrals = new Array(members);
 
-    referrals[0] = Users[_user].referral[0];
-    referrals[1] = Users[_user].referral[1];
-    referrals[2] = Users[_user].referral[2];
+    referrals[0] = users[_user].referrals[0];
+    referrals[1] = users[_user].referrals[1];
+    referrals[2] = users[_user].referrals[2];
 
-    for (let i = 0; i < checkLoop; i++) {
+    for (let i = 0; i < startLoop; i++) {
       for (let m = 0; m < 3; m++) {
-        if (Users[referrals[i]]?.referral[m]) {
-          referrals[(i + 1) * 3 + m] = Users[referrals[i]].referral[m];
+        if (users[referrals[i]].referrals[m] != "") {
+          referrals[(i + 1) * 3 + m] = users[referrals[i]]?.referrals[m];
         } else {
           break;
         }
       }
-      if (referrals[i].length >= members) break;
     }
 
-    console.log(referrals);
-
     for (let l = 0; l < 3; l++) {
-      for (let k = checkLoop; k < members; k++) {
-        if (Users[referrals[k]]?.referral.length == l) {
+      for (let k = startLoop; k < members; k++) {
+        if (users[referrals[k]]?.referrals.length == l) {
           noFreeReferrer = false;
           freeReferrer = referrals[k];
           break;
         }
       }
-      if (freeReferrer) break;
+      if (!noFreeReferrer) {
+        break;
+      }
     }
   }
   if (noFreeReferrer) {
     freeReferrer = userList[findRandomFreeReferrer()];
     console.log(freeReferrer);
-    if (members != 0) {
-      console.log("failed: ", freeReferrer);
-    }
   }
   console.log("-----------------------");
   return freeReferrer;
 }
 
-function completedLevel(_user: string) {
+function completedLevel(_user: Address) {
   for (let i = 0; i < LEVELS.length; i++) {
-    if (Users[_user].levelStat[i] < LEVELS[i]) {
+    if (users[_user].refStates[i] < LEVELS[i]) {
       return i;
     }
   }
 }
 
-function totalMembers(_user: string, _level: number) {
+function totalMembers(_level: number) {
   let members = 0;
-  let checkLoop = 0;
+  let startLoop = 0;
   if (_level == 1) return [3, 0];
   for (let i = 0; i < _level; i++) {
-    if (i > 0) checkLoop = checkLoop + LEVELS[i - 1];
+    if (i > 0) startLoop = startLoop + LEVELS[i - 1];
     members = members + LEVELS[i];
   }
-  return [members, checkLoop];
-}
-
-function payForLevel(
-  _level: number,
-  _user: string,
-  referer: Address,
-  _value: number
-) {
-  if (!Users[referer]?.isExist) {
-    referer = userList[1];
-  }
-
-  if (referer == userList[1]) {
-  } else if (!profitStat[referer]) {
-    profitStat[referer] = _value;
-  } else {
-    profitStat[referer] += _value;
-  }
-  levelStat[_level - 1]++;
+  return [members, startLoop];
 }
 
 function findRandomFreeReferrer() {
-  refCompleted = Math.floor(currUserID / 2);
-  for (let i = refCompleted; i < 500 + refCompleted; i++) {
-    if (Users[userList[i]].referral.length != 3) {
+  for (let i = currUserID / 2; i < 500 + currUserID / 2; i++) {
+    if (users[userList[i]]?.referrals.length == 0) {
       return i;
     }
   }
 }
 
+function userReferralList(_user: Address) {
+  return users[_user].refStates;
+}
+
+function userReferrals(_user: Address) {
+  return users[_user].referrals;
+}
+
+function userBalance(_user: Address) {
+  return STBank.contractUserBalance(_user);
+}
+
+function userExpired(_user: Address) {
+  for (let i = 0; i < users[_user].startTime.length; i++) {
+    if (users[_user].startTime[i] + PERIOD_LENGTH > now()) return false;
+    else true;
+  }
+}
+function requires(condition: boolean, msg: string) {
+  if (!condition) {
+    throw new Error(msg);
+  }
+}
+function currentLevelPrice(): any {
+  return currentLevel * 700;
+}
+
 export function StartLoop() {
-  currentLevel = 2;
+  // currentLevel = 2;
+  for (let n = 1; n < 1429; n++) {
+    // if (n > 1) {
+    //   currentLevel = 2;
+    //   if (n > 3000000) currentLevel = 4;
+    regUser(`0x${Math.floor(Math.random() * n)}`, `0x${n}`, 700);
+    // }
+    // else regUser("", `0x${n}`,
+  }
+  for (let n = 1429; n < 2130; n++) {
+    // if (n > 1) {
+    //   currentLevel = 2;
+    //   if (n > 3000000) currentLevel = 4;
+    regUser(`0x${Math.floor(Math.random() * n)}`, `0x${n}`, 1400);
+    // }
+    // else regUser("", `0x${n}`,
+  }
+  for (let n = 0; n < 200; n++) {
+    // if (n > 1) {
+    //   currentLevel = 2;
+    //   if (n > 3000000) currentLevel = 4;
+    withdrawIntrest(`0x${n}`);
+    // }
+    // else regUser("", `0x${n}`,
+  }
+  Now = 3000;
+  for (let n = 0; n < 200; n++) {
+    // if (n > 1) {
+    //   currentLevel = 2;
+    //   if (n > 3000000) currentLevel = 4;
+    updatePrice(`0x${n}`, 700);
+    // }
+    // else regUser("", `0x${n}`,
+  }
+  Now = 6000;
+  for (let n = 0; n < 2000; n++) {
+    // if (n > 1) {
+    //   currentLevel = 2;
+    //   if (n > 3000000) currentLevel = 4;
+    withdrawIntrest(`0x${n}`);
+    // }
+    // else regUser("", `0x${n}`,
+  }
+  Now = 38000 * 2;
+  for (let n = 0; n < 2000; n++) {
+    // if (n > 1) {
+    //   currentLevel = 2;
+    //   if (n > 3000000) currentLevel = 4;
+    withdrawFromBank(`0x${n}`);
+    // }
+    // else regUser("", `0x${n}`,
+  }
+  // currentLevel = 3;
   for (let n = 10000; n < 20000; n++) {
     // if (n > 1) {
     //   currentLevel = 2;
     //   if (n > 3000000) currentLevel = 4;
     regUser(
-      `0x${Math.floor(Math.random() * 10000)}`,
-      `0x${n}`,
-      currentLevelPrice()
-    );
-    // }
-    // else regUser("", `0x${n}`,
-  }
-  currentLevel = 3;
-  for (let n = 20000; n < 100000; n++) {
-    // if (n > 1) {
-    //   currentLevel = 2;
-    //   if (n > 3000000) currentLevel = 4;
-    regUser(
-      `0x${Math.floor(Math.random() * 10000)}`,
+      `0x${Math.floor(Math.random() * 200)}`,
       `0x${n}`,
       currentLevelPrice()
     );
@@ -310,8 +507,7 @@ export function StartLoop() {
   // }
   // console.log(Users["0x0"]);
 }
-
-// console.log("LevelState", levelStat);
+// console.log("LevelState", refStates);
 // console.log("List", userList);
 // console.log("UserComplete", userRefComplete);
 // console.log(profitStat);
