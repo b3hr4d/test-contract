@@ -1,11 +1,12 @@
 {
   "compilerOptions": {
+    "target": "es5",
+    "sourceMap": true,
     "outDir": "./out",
     "rootDir": "./src",
-    "sourceMap": true,
     "incremental": true,
-    "moduleResolution": "node",
+    "module": "commonjs",
     "resolveJsonModule": true,
-    "target": "es5"
+    "moduleResolution": "node"
   }
 }

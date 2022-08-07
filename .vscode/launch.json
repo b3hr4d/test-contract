@@ -14,7 +14,7 @@
       "type": "node",
       "request": "launch",
       "name": "Build Project",
-      "program": "${workspaceFolder}\\src\\app.ts",
+      "program": "${workspaceFolder}\\src\\test.ts",
       "preLaunchTask": "npm: build",
       "sourceMaps": true,
       "smartStep": true,

@@ -93,9 +93,8 @@ class Referral {
       this.users[this.userList[_referrerID]]?.referral.length >=
       this.REFERRER_1_LEVEL_LIMIT
     ) {
-      _referrerID = this.users[
-        this.findFreeReferrer(this.userList[_referrerID])
-      ].id;
+      _referrerID =
+        this.users[this.findFreeReferrer(this.userList[_referrerID])].id;
     }
 
     this.registerUser(_referrerID);

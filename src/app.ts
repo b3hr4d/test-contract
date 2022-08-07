@@ -1,4 +1,4 @@
-import { StartLoop } from "./hello";
+import { StartLoop } from "./Investment";
 
 class App {
   /** Entry point of our app */

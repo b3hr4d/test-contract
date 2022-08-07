@@ -1,7 +1,9 @@
+// @ts-nocheck
 // import * as usersData from "./UserData.json";
 // import * as userListData from "./UserList.json";
 const userInterest = {};
-let Now = 1000;
+var Now = Math.floor(Date.now() / 1000);
+var Day = 86400;
 class Stbank {
   payWithStt(_sender: any, daily: number, referrals: number) {
     this.totalSttSupply += daily + referrals;
@@ -9,8 +11,9 @@ class Stbank {
   }
   withdrawTrx(_sender: string, interest: number, referrals: number) {
     this.totalSttSupply += interest;
-    this.users[_sender] -= 700;
-    this.contractBalance -= 700;
+    const balance = this.users[_sender];
+    this.users[_sender] -= balance;
+    this.contractBalance -= balance;
     return true;
   }
   depositTrx(_sender: any, _value: any): boolean {
@@ -31,8 +34,8 @@ class Stbank {
 const STBank = new Stbank();
 class emit {
   static WithdrawFromBank(_sender: string, interest: any, arg2: number) {
-    if (userInterest[_sender]) {
-      userInterest[_sender] += interest;
+    if (typeof userInterest[_sender] == "number") {
+      userInterest[_sender] = userInterest[_sender] + interest;
     } else userInterest[_sender] = interest;
     console.log("Withdraw: ", _sender, interest);
   }
@@ -44,13 +47,8 @@ class emit {
   }
 }
 
-const now = () => {
-  return Math.floor(Now / 1000);
-};
-
 let STT_LIMIT = 100000000000000000000;
 let PERIOD_LENGTH = 37;
-let currentLevel = 1;
 let REFERRER_1_LEVEL_LIMIT = 3;
 let LEVELS = [3, 9, 27, 81, 243, 729, 2187];
 let PERCENTAGE = [206158436164, 137438957253, 687194786265];
@@ -60,9 +58,9 @@ type Address = string;
 interface User {
   id: number;
   isExist: boolean;
-  startTime: number[];
+  startTimes: number[];
   referralID: number;
-  lastWithdraw: number;
+  withdrawTime: number;
   referrals: Address[];
   refStates: number[];
   refAmounts: number;
@@ -88,10 +86,10 @@ users["0x0"] = {
   isExist: true,
   referralID: 0,
   id: currUserID,
-  startTime: [now()],
+  startTimes: [Now],
   referrals: [],
   refAmounts: 0,
-  lastWithdraw: 0,
+  withdrawTime: 0,
   refStates: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
 };
 userList[currUserID] = "0x0";
@@ -124,6 +122,9 @@ function regUser(_referrer: Address, _sender: Address, _value: number) {
     requires(false, "Error::Refferal, Incorrect referrer!");
   }
   console.log(_referrerID, currUserID);
+  if (_referrerID == undefined) {
+    console.log("here");
+  }
   requires(
     _referrerID > 0 && _referrerID <= currUserID,
     "Error::Refferal, Incorrect referrer Id!"
@@ -145,9 +146,9 @@ function regUser(_referrer: Address, _sender: Address, _value: number) {
     isExist: true,
     id: currUserID,
     referralID: _referrerID,
-    startTime: [],
+    startTimes: [],
     referrals: [],
-    lastWithdraw: 0,
+    withdrawTime: 0,
     refAmounts: 0,
     refStates: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
   };
@@ -171,9 +172,9 @@ function regUser(_referrer: Address, _sender: Address, _value: number) {
     }
     if (lastRefParent == 1) break;
   }
-  users[_sender].startTime.push(now());
+  users[_sender].startTimes.push(Now);
 
-  emit.RegisterNewUser(_sender, userList[_referrerID], now());
+  emit.RegisterNewUser(_sender, userList[_referrerID], Now);
 }
 
 function updatePrice(_sender: Address, _value: number) {
@@ -209,58 +210,81 @@ function updatePrice(_sender: Address, _value: number) {
     if (lastRefParent == 0) break;
   }
 
-  users[_sender].startTime.push(now());
+  users[_sender].startTimes.push(Now);
 
-  emit.DepositToBank(_sender, currentPrice, now());
+  emit.DepositToBank(_sender, currentPrice, Now);
 }
 
 function withdrawFromBank(_sender: Address) {
   requires(userExpired(_sender), "Error::Refferal, User is not expired!");
 
-  const [daily, referrals, withdrawTime] = calculateInterest(_sender);
+  const [daily, referrals, savedTime] = calculateInterest(_sender);
 
   requires(
     STBank.withdrawTrx(_sender, daily, referrals),
     "Error::Refferal, Withdraw failed!"
   );
   users[_sender].refAmounts -= referrals;
-  users[_sender].lastWithdraw = withdrawTime;
-  emit.WithdrawFromBank(_sender, daily, now());
+  users[_sender].withdrawTime = savedTime;
+  users[_sender].startTimes = [];
+  emit.WithdrawFromBank(_sender, daily + referrals, savedTime);
 }
 
 function calculateInterest(_sender: Address) {
   requires(users[_sender]?.isExist, "Error::Refferal, User not exist!");
+  let savedTime = Now;
   let userBalances = userBalance(_sender);
   let currentPrice = freezePrice();
 
   requires(userBalances > 0, "Error::Refferal, User dosen't have value!");
 
-  let daily = 0;
+  let daily = calculateDaily(_sender, savedTime);
   let referral = 0;
-  let withdrawTime = 0;
-
-  for (let i = 0; i < users[_sender].startTime.length; i++) {
-    let lastAmount = 0;
-    withdrawTime = now() - users[_sender].startTime[i];
-    if (withdrawTime > 37) withdrawTime = 37;
-    if (users[_sender].lastWithdraw < 37) {
-      if (users[_sender].lastWithdraw > 0)
-        lastAmount = 2 ** users[_sender].lastWithdraw * 50;
-      daily += 2 ** withdrawTime * 50 - lastAmount;
-    }
-  }
-
-  console.log("daily: %s, time: %s", daily, withdrawTime);
 
   if (userBalances == currentPrice) {
     referral = users[_sender].refAmounts;
   }
+  console.log("dailyAmount: %s, referralAmount: %s", daily, referral);
 
-  return [daily, referral, withdrawTime];
+  return [daily, referral, savedTime];
+}
+
+function daysBetween(_time1: number, _time2: number) {
+  return Math.floor((_time1 - _time2) / 86400);
+}
+
+function calculateDaily(sender: Address, time: number) {
+  let daily = 0;
+  console.log("Sender:", sender);
+  for (let i = 0; i < users[sender].startTimes.length; i++) {
+    let startTime = users[sender].startTimes[i];
+    let endTime = startTime + 37 * 86400;
+    let withdrawTime = users[sender].withdrawTime;
+    if (withdrawTime < endTime) {
+      if (startTime > withdrawTime) withdrawTime = startTime;
+      let lastAmount = 0;
+      let withdrawDay = daysBetween(time, startTime);
+      if (withdrawDay > 37) {
+        withdrawDay = 37;
+      }
+      if (withdrawTime > startTime)
+        lastAmount = 2 ** daysBetween(startTime, withdrawTime) * 50;
+      daily += 2 ** withdrawDay * 50 - lastAmount;
+      console.log(
+        "should pay %s Day for %s STT, you got %s Day for %s STT before!",
+        withdrawDay,
+        (2 ** withdrawDay * 50) / 10 ** 9,
+        daysBetween(startTime, withdrawTime),
+        lastAmount / 10 ** 9
+      );
+    }
+  }
+  console.log("Total:", daily, "\n-------");
+  return daily;
 }
 
 function withdrawIntrest(_sender: Address) {
-  let [daily, referrals, withdrawTime] = calculateInterest(_sender);
+  let [daily, referrals, savedTime] = calculateInterest(_sender);
 
   requires(
     STBank.payWithStt(_sender, daily, referrals),
@@ -268,9 +292,9 @@ function withdrawIntrest(_sender: Address) {
   );
 
   users[_sender].refAmounts -= referrals;
-  users[_sender].lastWithdraw = withdrawTime;
+  users[_sender].withdrawTime = savedTime;
 
-  emit.WithdrawFromBank(_sender, daily + referrals, withdrawTime);
+  emit.WithdrawFromBank(_sender, daily /* + referrals */, savedTime);
 }
 
 function findMostFreeReferrals(_user: Address) {
@@ -295,14 +319,10 @@ function findMostFreeReferrals(_user: Address) {
 
     for (let i = 0; i < startLoop; i++) {
       for (let m = 0; m < 3; m++) {
-        if (users[referrals[i]].referrals[m] != "") {
-          referrals[(i + 1) * 3 + m] = users[referrals[i]]?.referrals[m];
-        } else {
-          break;
-        }
+        referrals[(i + 1) * 3 + m] = users[referrals[i]]?.referrals[m];
       }
     }
-
+    console.log(referrals);
     for (let l = 0; l < 3; l++) {
       for (let k = startLoop; k < members; k++) {
         if (users[referrals[k]]?.referrals.length == l) {
@@ -344,9 +364,11 @@ function totalMembers(_level: number) {
 }
 
 function findRandomFreeReferrer() {
-  for (let i = currUserID / 2; i < 500 + currUserID / 2; i++) {
-    if (users[userList[i]]?.referrals.length == 0) {
-      return i;
+  for (let l = 0; l < 3; l++) {
+    for (let i = Math.floor(currUserID / 2); i < 500 + currUserID / 2; i++) {
+      if (users[userList[i]]?.referrals.length == l) {
+        return i;
+      }
     }
   }
 }
@@ -364,10 +386,8 @@ function userBalance(_user: Address) {
 }
 
 function userExpired(_user: Address) {
-  for (let i = 0; i < users[_user].startTime.length; i++) {
-    if (users[_user].startTime[i] + PERIOD_LENGTH > now()) return false;
-    else true;
-  }
+  const lastTime = users[_user].startTimes.length - 1;
+  return users[_user].startTimes[lastTime] + PERIOD_LENGTH <= Now;
 }
 function requires(condition: boolean, msg: string) {
   if (!condition) {
@@ -375,85 +395,94 @@ function requires(condition: boolean, msg: string) {
   }
 }
 function currentLevelPrice(): any {
-  return currentLevel * 700;
+  return STBank.sttPrice() * 700;
 }
 
 export function StartLoop() {
-  // currentLevel = 2;
-  for (let n = 1; n < 1429; n++) {
-    // if (n > 1) {
-    //   currentLevel = 2;
-    //   if (n > 3000000) currentLevel = 4;
-    regUser(`0x${Math.floor(Math.random() * n)}`, `0x${n}`, 700);
-    // }
-    // else regUser("", `0x${n}`,
+  console.log(Now);
+  for (var n = 1; n < 4; n++) {
+    regUser("0x0" /*  + Math.floor(Math.random() * n) */, "0x" + n, 700);
   }
-  for (let n = 1429; n < 2130; n++) {
-    // if (n > 1) {
-    //   currentLevel = 2;
-    //   if (n > 3000000) currentLevel = 4;
-    regUser(`0x${Math.floor(Math.random() * n)}`, `0x${n}`, 1400);
-    // }
-    // else regUser("", `0x${n}`,
+  for (var n = 4; n < 7; n++) {
+    regUser("0x0" /*  + Math.floor(Math.random() * n) */, "0x" + n, 700);
   }
-  for (let n = 0; n < 200; n++) {
-    // if (n > 1) {
-    //   currentLevel = 2;
-    //   if (n > 3000000) currentLevel = 4;
-    withdrawIntrest(`0x${n}`);
-    // }
-    // else regUser("", `0x${n}`,
+  for (var n = 7; n < 10; n++) {
+    regUser("0x0" /*  + Math.floor(Math.random() * n) */, "0x" + n, 700);
   }
-  Now = 3000;
-  for (let n = 0; n < 200; n++) {
-    // if (n > 1) {
-    //   currentLevel = 2;
-    //   if (n > 3000000) currentLevel = 4;
-    updatePrice(`0x${n}`, 700);
-    // }
-    // else regUser("", `0x${n}`,
+  for (var n = 11; n < 1419; n++) {
+    regUser("0x0" /*  + Math.floor(Math.random() * n) */, "0x" + n, 700);
   }
-  Now = 6000;
-  for (let n = 0; n < 2000; n++) {
-    // if (n > 1) {
-    //   currentLevel = 2;
-    //   if (n > 3000000) currentLevel = 4;
-    withdrawIntrest(`0x${n}`);
-    // }
-    // else regUser("", `0x${n}`,
+  updatePrice("0x0", 700);
+  for (var n = 1429; n < 2100; n++) {
+    regUser("0x0", "0x" + n, 1400);
   }
-  Now = 38000 * 2;
-  for (let n = 0; n < 2000; n++) {
-    // if (n > 1) {
-    //   currentLevel = 2;
-    //   if (n > 3000000) currentLevel = 4;
-    withdrawFromBank(`0x${n}`);
-    // }
-    // else regUser("", `0x${n}`,
+  for (var n = 0; n < 87; n++) {
+    withdrawIntrest("0x" + n);
   }
-  // currentLevel = 3;
-  for (let n = 10000; n < 20000; n++) {
-    // if (n > 1) {
-    //   currentLevel = 2;
-    //   if (n > 3000000) currentLevel = 4;
+  Now = Now + Day;
+  for (var n = 0; n < 87; n++) {
+    updatePrice("0x" + n, 700);
+  }
+  console.log(Now);
+  for (var n = 0; n < 87; n++) {
+    withdrawIntrest("0x" + n);
+  }
+  Now = Now + Day * 2;
+  console.log(Now);
+  for (var n = 0; n < 87; n++) {
+    withdrawIntrest("0x" + n);
+  }
+  Now = Now + Day * 5;
+  console.log(Now);
+  for (var n = 0; n < 87; n++) {
+    withdrawIntrest("0x" + n);
+  }
+  for (var n = 1429; n < 2100; n++) {
+    regUser("0x" + Math.floor(Math.random() * n), "0x" + n, 1400);
+  }
+  Now = Now + Day * 25;
+  console.log(Now);
+  for (var n = 0; n < 87; n++) {
+    withdrawIntrest("0x" + n);
+  }
+  Now = Now + Day * 6;
+  for (var n = 0; n < 87; n++) {
+    withdrawIntrest("0x" + n);
+  }
+  Now = Now + Day;
+  for (var n = 0; n < 87; n++) {
+    withdrawIntrest("0x" + n);
+  }
+  console.log(Now);
+  for (var n = 0; n < 87; n++) {
+    updatePrice("0x" + n, 700);
+  }
+  Now = Now + Day * 45;
+  for (var n = 87; n < 200; n++) {
+    updatePrice("0x" + n, 1400);
+  }
+  for (var n = 0; n < 87; n++) {
+    withdrawIntrest("0x" + n);
+  }
+  Now = Now + Day * 90;
+  for (var n = 0; n < 87; n++) {
+    withdrawFromBank("0x" + n);
+  }
+  for (var n = 2100; n < 10000; n++) {
     regUser(
-      `0x${Math.floor(Math.random() * 200)}`,
-      `0x${n}`,
+      "0x" + Math.floor(Math.random() * 200),
+      "0x" + n,
       currentLevelPrice()
     );
-    // }
-    // else regUser("", `0x${n}`,
   }
-  currentLevel = 4;
-  for (let n = 100000; n < 1000000; n++) {
-    // if (n > 1) {
-    //   currentLevel = 2;
-    //   if (n > 3000000) currentLevel = 4;
-    regUser("", `0x${n}`, currentLevelPrice());
-    // }
-    // else regUser("", `0x${n}`,
+  Now = Now + Day * 146;
+  for (var n = 2000; n < 10000; n++) {
+    withdrawFromBank("0x" + n);
   }
-  console.log(Users["0x0"]);
+  for (var n = 10000; n < 100000; n++) {
+    regUser("", "0x" + n, currentLevelPrice());
+  }
+  console.log(users["0x0"]);
   findMostFreeReferrals("0x2");
   findMostFreeReferrals("0x100");
   // for (let m = 4000000; m < 8000000; m++) {
